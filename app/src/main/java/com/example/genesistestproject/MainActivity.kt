@@ -1,56 +1,63 @@
 package com.example.genesistestproject
 
 
-import android.media.MediaPlayer
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.annotation.OptIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.constraintlayout.compose.ConstraintLayout
-import androidx.constraintlayout.compose.Dimension
-import androidx.core.net.toUri
-import androidx.lifecycle.ViewModel
-import androidx.media3.common.util.UnstableApi
+import androidx.compose.ui.viewinterop.AndroidView
+import com.example.genesistestproject.slider.LabeledRangeSlider
 import com.example.genesistestproject.ui.theme.GenesisTestProjectTheme
-import java.io.IOException
-import kotlin.math.roundToInt
+import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.Player.STATE_READY
+import com.google.android.exoplayer2.SimpleExoPlayer
+import com.google.android.exoplayer2.source.ProgressiveMediaSource
+import com.google.android.exoplayer2.ui.PlayerView
+import com.google.android.exoplayer2.upstream.DefaultDataSource
 
 class MainActivity : ComponentActivity() {
 
-    private val pickVideo =
-        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-            uri?.let {
-                val path = FileUtils.getPath(this, uri).toUri()
-                viewModel.initializePlayer(path)
-            }
-        }
-
-    private val viewModel by viewModels<VideoPlayerViewModel>()
-
-    private val shadowColor = Color(0x60000000)
-    private val leftBoxColor = Color(0xff0ff000)
-    private val rightBoxColor = Color(0xff0000ff)
-
-
+    private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,228 +69,210 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    RangeSelector(
-                        modifier = Modifier
-                            .background(Color.White)
-                            .height(100.dp),
-                        length = 100,
-                        onStartChange = {},
-                        onEndChange = {},
-                        onCurrentPositionChange = {}
-                    )
+                    MainScreen()
                 }
             }
         }
 
-
     }
 
     @Composable
-    fun VideoPlayerScreen(viewModel: VideoPlayerViewModel) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            if (viewModel.videoUri == Uri.EMPTY) {
-                Button(
-                    onClick = {
-                        pickVideo.launch("video/*")
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp)
-                ) {
-                    Text("Pick a Video")
+    fun MainScreen(modifier: Modifier = Modifier) {
+        val context = LocalContext.current
+        val result = remember { mutableStateOf<Uri>(Uri.EMPTY) }
+        val isPlaying = remember {
+            mutableStateOf<Boolean>(false)
+        }
+
+        val videoDuration = remember {
+            mutableLongStateOf(-1)
+        }
+        val videoCurrentPosition = remember {
+            mutableLongStateOf(-1)
+        }
+
+        var upperSliderBound = remember {
+            mutableLongStateOf(0)
+        }
+
+
+        val videoPicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent(),
+            onResult = { uri ->
+                uri?.let {
+//                    val file = viewModel.createTmpFileFromUri(this, uri, "tempVid")
+//                    Log.d("VideoPicker", file.toString())
+//                    result.value = file?.toUri() ?: Uri.EMPTY
+//                    result.value = FileUtilit.getPath(context, uri).toUri()
+//                    val path: String? = FileUtilKt.getValidatedFileUri(context, uri)
+//                    val filePath = Uri.parse(path)
+                    result.value = uri
+                }
+            }
+        )
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+            if (result.value == Uri.EMPTY) {
+                VideoPicker {
+                    videoPicker.launch("video/*")
                 }
             } else {
-                VideoPlayer(viewModel)
-            }
-        }
-    }
-
-    @OptIn(UnstableApi::class) @Composable
-    fun VideoPlayer(viewModel: VideoPlayerViewModel) {
-        val context = LocalContext.current
-        val mediaPlayer = remember { MediaPlayer() }
-
-        DisposableEffect(viewModel.videoUri) {
-            viewModel.initializePlayer(viewModel.videoUri!!)
-            onDispose {
-                viewModel.releasePlayer()
-            }
-        }
-
-        LaunchedEffect(mediaPlayer) {
-            try {
-
-//                val surface = android.view.Surface(surfaceHolder.surface)
-                mediaPlayer.setDataSource(context, viewModel.videoUri!!)
-                mediaPlayer.prepare()
-                mediaPlayer.start()
-            } catch (e: IOException) {
-                e.printStackTrace()
-            }
-        }
-
-        DisposableEffect(mediaPlayer) {
-            onDispose {
-                mediaPlayer.release()
-            }
-        }
-
-//        DisposableEffect(
-//            AndroidView(factory = {
-//                PlayerView(context).apply {
-//                    hideController()
-//                    useController = false
-//                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-//
-//                    player = mediaPlayer
-//                    layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-//                }
-//            })
-//        ) {
-//            onDispose { exoPlayer.release() }
-//        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .background(Color.Black)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text("Video Playing...")
-            }
-        }
-    }
-
-
-    @Composable
-    fun RangeSelector(
-        modifier: Modifier = Modifier,
-        length: Long,
-        onStartChange: (Long) -> Unit,
-        onEndChange: (Long) -> Unit,
-        onCurrentPositionChange: (Long) -> Unit
-    ) {
-        val startPosition = remember { mutableLongStateOf(0) }
-        val endPosition = remember { mutableLongStateOf(length) }
-        val view = LocalView.current
-
-        var offsetLeftX by remember { mutableStateOf(0f) }
-
-        ConstraintLayout(modifier = modifier) {
-            val (leftShade, leftBox, rightBox, rightShade) = createRefs()
-
-            ShadeBackground(
-                modifier = Modifier
-                    .constrainAs(leftShade) {
-                        linkTo(
-                            start = parent.start,
-                            top = parent.top,
-                            bottom = parent.bottom,
-                            end = leftBox.start
-                        )
-                        height = Dimension.fillToConstraints
-                        width = Dimension.fillToConstraints
+                Box(contentAlignment = Alignment.Center) {
+                    VideoPlayer(uri = result.value) {
+                        videoDuration.longValue = viewModel.getDuration()
                     }
-            )
-            Box(
-                modifier = Modifier
-                    .width(80.dp)
-                    .fillMaxHeight()
-                    .background(leftBoxColor)
-                    .offset { IntOffset(offsetLeftX.roundToInt(), 0) }
-                    .draggable(
-                        orientation = Orientation.Horizontal,
-                        state = rememberDraggableState { delta ->
-                            offsetLeftX += delta
-                            Log.d("LeftBox", "Offset $offsetLeftX")
+                    Button(
+                        onClick = { isPlaying.value = viewModel.playPause() },
+                        modifier = modifier
+                    ) {
+                        Text(if (isPlaying.value) "Pause" else "Play")
+                    }
+                }
+            }
+
+            if (videoDuration.longValue > 0) {
+
+                val mainHandler = Handler(Looper.getMainLooper())
+                mainHandler.post(object : Runnable {
+                    override fun run() {
+                        val curPos = viewModel.getCurrentPosition()
+
+                        if (curPos >= upperSliderBound.longValue) {
+                            viewModel.playerPause()
                         }
-                    ).clipToBounds()
-                    .constrainAs(leftBox) {
-//                        linkTo(
-//                            top = parent.top,
-//                            bottom = parent.bottom
-//                        )
-//                        start.linkTo(parent.start, margin = 30.dp)
-                    }
-            ) {
 
-            }
-            Box(
-                modifier = Modifier
-                    .width(20.dp)
-                    .fillMaxHeight()
-                    .background(rightBoxColor)
-                    .constrainAs(rightBox) {
-                        linkTo(
-                            top = parent.top,
-                            bottom = parent.bottom
-                        )
-                        end.linkTo(parent.end, margin = 30.dp)
-                    }
-            ) {
+                        videoCurrentPosition.longValue = viewModel.getCurrentPosition()
+                        mainHandler.postDelayed(this, 500)
 
-            }
-            ShadeBackground(
-                modifier = Modifier
-                    .constrainAs(rightShade) {
-                        linkTo(
-                            start = rightBox.end,
-                            top = parent.top,
-                            bottom = parent.bottom,
-                            end = parent.end
-                        )
-                        height = Dimension.fillToConstraints
-                        width = Dimension.fillToConstraints
+
                     }
-            )
+                })
+
+                Box(contentAlignment = Alignment.Center) {
+                    val steps = (0..videoDuration.longValue).step(1000).toList()
+                    var lowerBound by rememberSaveable { mutableStateOf(steps[1]) }
+                    var upperBound by rememberSaveable { mutableStateOf(steps[steps.size - 2]) }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                        Image(
+                            painter = painterResource(id = R.drawable.stub_img),
+                            contentDescription = "first"
+                        )
+                    }
+
+                    Slider(
+                        value = videoCurrentPosition.longValue.toFloat(),
+                        onValueChange = {
+
+                        },
+                        valueRange = 0f .. videoDuration.longValue.toFloat()
+                    )
+
+                    LabeledRangeSlider(
+                        selectedLowerBound = lowerBound,
+                        selectedUpperBound = upperBound,
+                        steps = steps,
+                        onRangeChanged = { lower, upper ->
+                            lowerBound = lower
+                            upperBound = upper
+                            upperSliderBound.longValue = upper
+                            Log.i("LabeledRangeSlider", "Updated selected range ${lowerBound..upperBound}")
+                            viewModel.scrollTo(lower)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                    )
+
+
+                }
+            }
+
         }
     }
 
     @Composable
-    fun ShadeBackground(modifier: Modifier) {
-        Box(modifier = modifier.background(shadowColor))
+    fun VideoPicker(modifier: Modifier = Modifier, onClick: () -> Unit) {
+        Button(
+            onClick = onClick,
+            modifier = modifier
+        ) {
+            Text("Pick video")
+        }
     }
 
-    @Preview(heightDp = 40, widthDp = 200)
     @Composable
-    fun RangeSelectorPreview() {
-        RangeSelector(
-            modifier = Modifier.background(Color.White),
-            length = 100,
-            onStartChange = {},
-            onEndChange = {},
-            onCurrentPositionChange = {}
+    fun VideoPlayer(uri: Uri, onPlayerReady: () -> Unit) {
+        val context = LocalContext.current
+        val exoPlayer = remember { getSimpleExoPlayer(context, uri) }
+
+        exoPlayer.addListener(object: Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                super.onPlaybackStateChanged(playbackState)
+                if (playbackState == STATE_READY) {
+                    onPlayerReady()
+                }
+            }
+        })
+
+        viewModel.initExoPlayer(exoPlayer)
+        AndroidView(
+            modifier = Modifier
+                .padding(20.dp),
+            factory = { context1 ->
+                PlayerView(context1).apply {
+                    player = exoPlayer
+                    useController = false
+                }
+            },
         )
     }
 
+    private fun getSimpleExoPlayer(context: Context, uri: Uri): SimpleExoPlayer {
+        return SimpleExoPlayer.Builder(context).build().apply {
+            val dataSourceFactory = DefaultDataSource.Factory(context)
+            val localVideoItem = MediaItem.fromUri(uri)
+            val localVideoSource = ProgressiveMediaSource
+                .Factory(dataSourceFactory)
+                .createMediaSource(localVideoItem)
+            this.addMediaSource(localVideoSource)
+            this.prepare()
+        }
+    }
+
+    @Preview()
+    @Composable
+    fun MainScreenPreview() {
+        MainScreen()
+    }
 
 }
 
-class VideoPlayerViewModel : ViewModel() {
-    var videoUri: Uri? by mutableStateOf(Uri.EMPTY)
-        private set
-
-    fun initializePlayer(uri: Uri) {
-        videoUri = uri
-    }
-
-    fun releasePlayer() {
-        videoUri = Uri.EMPTY
-    }
-}
